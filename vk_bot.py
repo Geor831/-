@@ -20,7 +20,7 @@ async def extract_query(text: str) -> str:
         resp = await ai_client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "Выдели из текста только поисковый запрос. Убери слова 'найди', 'покажи', 'сколько стоит'. Верни только ключевые слова."},
+                {"role": "system", "content": "Выдели из текста только поисковый запрос. Если есть ограничение по цене (например 'до 500 рублей'), напиши это в запросе. Верни только ключевые слова."},
                 {"role": "user", "content": text}
             ],
             temperature=0.1,
@@ -31,25 +31,32 @@ async def extract_query(text: str) -> str:
         return text
 
 async def search_wb(query: str):
-    """Прямой запрос к поиску Wildberries"""
+    """Прямой запрос к поиску Wildberries (с заголовками, чтобы не блокировало)"""
     url = "https://search.wb.ru/exactmatch/ru/common/v5/search"
     params = {
-        "appType": "1", "curr": "rub", "dest": "-1257786", # Москва
-        "query": query, "resultset": "catalog", "spp": "30",
+        "appType": "1", 
+        "curr": "rub", 
+        "dest": "-1257786", # Москва
+        "query": query, 
+        "resultset": "catalog", 
+        "spp": "30",
+        "suppressSpellcheck": "false",
     }
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "x-requested-with": "XMLHttpRequest",
     }
 
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, params=params, headers=headers, timeout=10) as resp:
+            async with session.get(url, params=params, headers=headers, timeout=15) as resp:
                 if resp.status != 200:
                     print(f"WB HTTP ошибка: {resp.status}")
                     return None
                 data = await resp.json()
                 products = data.get("data", {}).get("products", [])
-                return products[:5] # Возвращаем первые 5 товаров
+                return products[:5]
         except Exception as e:
             print(f"WB ошибка сети: {e}")
             return None
@@ -65,13 +72,13 @@ async def handle_message(message: Message):
 
     products = await search_wb(query)
     if not products:
-        await message.answer("Ничего не нашёл. Попробуйте переформулировать запрос.")
+        await message.answer("Не удалось получить товары с Wildberries. Попробуйте переформулировать запрос.")
         return
 
     for p in products:
         name = p.get("name", "Без названия")
         brand = p.get("brand", "")
-        price = p.get("salePriceU", 0) / 100 # Цена в копейках
+        price = p.get("salePriceU", 0) / 100
         rating = p.get("reviewRating", 0)
         prod_id = p.get("id")
         
